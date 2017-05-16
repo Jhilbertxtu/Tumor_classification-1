@@ -1,0 +1,125 @@
+---
+title: "Proj_131"
+author: "Martin Davila"
+date: "December 1, 2016"
+output: pdf_document
+---
+
+```{r, include=FALSE}
+library(ggplot2)
+library(tree)
+library(ROCR)
+library("boot")
+library("data.table")
+library(caret)
+library("pROC")
+library(randomForest)
+```
+
+```{r}
+setwd("~/R")
+data <- read.csv("data.csv")
+Num_NA<-sapply(data,function(y)length(which(is.na(y)==T)))
+sum(Num_NA)
+sort(sapply(data, function(x) { sum(is.na(x)) }), decreasing=TRUE)
+
+##Create labels and make them factors for classification
+data$label <- ifelse(data$diagnosis == 'M', 1, 0)
+data$label <- as.factor(data$label)
+
+##Not sure what X column is and is not explained in dataset so we drop and remove diagnosis and id since we mean to predict this
+data.train <- subset(data, select = -c(X, diagnosis, id) )
+
+#Scatterplot Matrices to view relationships between attributes
+##Clear relationships between radius and perimeter and area which is expected
+pairs(data.train[,1:10])
+pairs(data.train[,11:20])
+pairs(data.train[21:30])
+
+set.seed(134)
+part <- createDataPartition(data.train$label, p=0.7, list = F)
+train <- data.train[part,]
+test <- data.train[-part,]
+```
+
+```{r}
+#Simple decision tree as a base model
+tree <- tree(label~., data = train)
+tree #Text of tree
+plot(tree, main = "Basic Tree"); text(tree, cex = 0.75) 
+summary(tree) #Misclasification Error Rate of 0.01754 pretty good for base model might just be over-fitting
+
+##Plot ROC Curve and compute AUC
+plot.roc(roc(test$label, as.numeric(predict(tree, test, type = "class")))
+         , print.auc = TRUE, print.thres = TRUE, las = 1, main = "ROC for Basic Tree")
+
+##We apply Cross Validation to prune the tree
+cv <- cv.tree(tree)
+cv
+plot(cv, main= "CV plot of basic tree")
+tree2 = prune.misclass(tree, best = 5)
+tree2
+summary(tree2)  #Error Rate of 0.02256
+plot(tree2, main = "Pruned Tree"); text(tree2, cex=0.75)
+
+##Plot ROC Curve and compute AUC
+plot.roc(roc(test$label, as.numeric(predict(tree2, test, type = "class")))
+         , print.auc = TRUE, print.thres = TRUE, las = 1, main = "ROC for Pruned Tree")
+
+#Fianl model has a calssification rate of 97.744% and AUC of 0.945
+```
+
+
+```{r}
+glm1 <- glm(label ~ 1 , data = train, family = binomial(link = 'logit')) #Base model
+glm <- glm(label ~ . , data = train, family = binomial(link = 'logit'), control = list(maxit=50)) #Model with all attributes
+
+summary(glm)
+
+##We will apply a 10 fold CV
+ctrl <- trainControl(method = "repeatedcv", number = 10, savePredictions = TRUE)
+
+glm.fit <- train(label ~ .,  data=train, method="glm", family="binomial",
+                 trControl = ctrl)
+
+pred = predict(glm.fit, newdata=test)
+confusionMatrix(data=pred, test$label) ##Accuracy of 91.76%
+
+#ROC Curve of model
+p = predict(glm, test, type="response")
+pr = prediction(p, test$label)
+prf = performance(pr, measure = "tpr", x.measure = "fpr")
+auc = performance(pr, measure = "auc")
+auc = auc@y.values[[1]]
+plot(prf, main = "ROC Curve for basic glm model");text(0.5,0.5,paste("AUC = ",format(auc, digits=5, scientific=FALSE))) ##AUC of 0.90795
+
+
+
+#Use R step function to find model with least AIC
+step(glm1,scope=formula(glm), direction="forward",k=2) #Using AIC
+
+step.model <- glm(label ~ perimeter_worst + smoothness_worst + texture_worst + 
+    concave.points_mean + compactness_mean + perimeter_mean + 
+    radius_worst + concavity_worst, data = train, family = binomial(link ='logit'))
+
+summary(step.model)
+anova(step.model, test = "Chisq")
+
+#Fit glm model with same attributes as our step model but with cross validation
+step.fit <- train(label ~ perimeter_worst + smoothness_worst + texture_worst + 
+    concave.points_mean + compactness_mean + perimeter_mean + 
+    radius_worst + concavity_worst,  data=train, method="glm", family="binomial",
+                 trControl = ctrl)
+
+pred = predict(step.fit, newdata=test)
+confusionMatrix(data=pred, test$label) ##Accuracy of 97.06% seems better 
+
+
+#ROC Curve of model
+p = predict(step.model, test, type="response")
+pr = prediction(p, test$label)
+prf = performance(pr, measure = "tpr", x.measure = "fpr")
+auc = performance(pr, measure = "auc")
+auc = auc@y.values[[1]]
+plot(prf, main = "ROC Curve for reduced glm model");text(0.5,0.5,paste("AUC = ",format(auc, digits=5, scientific=FALSE))) ##AUC of 0.98606
+```
