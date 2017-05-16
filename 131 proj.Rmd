@@ -1,0 +1,200 @@
+---
+title: "131 Proj"
+author: "Martin Davila"
+date: "November 30, 2016"
+output: pdf_document
+---
+```{r, include=FALSE}
+library(Amelia)
+library(ggplot2)
+library(lattice)
+library(rpart)
+```
+1. Description of your dataset:
+
+(a) What are some of the attributes in this dataset? How many observations?
+I chose to use the Ames Housing dataset found on the Kaggle website.  This dataset has 79 explanatory variables describing most aspects about a home.  The data is split in two sets one is for training your model and Home sale price is given.  The test set has the same variables as the test but is missing the sale price which is to be predicted and assesed on the Kaggle website.  
+
+(b) Do you think all attributes to be useful in your analysis? Why or why not?
+There are many factors that go into determining the price of a house, but with so many attributes I am sure some will be more useful in my analysis than others.  Due to the limited number of observations I would like to have as much information to analyze as possible. 
+
+(c) How would you rate overall quality of the data? Justify your response.
+There are a total of 15,424 missing values in both the test set and the training set, which need to be dealt with.  The number of nulls by themselves make this data difficult to work with, which is why I would rate this data poorly.  The one redeeming factor about this data is the number of attributes it includes which can allow for some feature engineering to feed the most important information to our model, that isn't possibe with limited datasets.
+
+2. Description of your research question:
+
+(a) What is the research question your project will address? (Summarize into one or two sentences.)
+I plan to categorize the sale price of the homes into five different categories(Cheap, Slightly cheap, Median, slightly expensive, Expensive) and create a model that will predict which category the house falls in using the data provided.
+
+(b) Can you think of any other questions that may potentially be answered using the same dataset?
+(Think creatively for this thought experiment.)
+I think one question that can be answered using the dataset is determining if a house is over or under priced.  Using my model ultimately I would like to be able to determine whether or not a house is over or underpriced based off my predictions.  This would allow homebuyers with useful information about whether the home they are considering buying is really worth the money compared to the predicted vales of the other homes in the area.
+
+3. Description of your analysis:
+
+(a) What methods will you use to build models (at least two) for comparison?
+Due to the high number of attributes my first thought was to use PCA for dimensionality reduction and only include the most significant information in my models.
+
+(b) How will you choose each of your models? (model selection) State any relevant validation metrics,
+resampling methods, "rules-of-thumb", etc you are using.
+I will choose the model that gives me the highest accuracy rate according to the confusion matrix.  Cross-validation will also be applied in order to avoid over-fitting the data.
+
+(c) How will you compare the selected models?
+I will first compare my models by seeing which model has the highest accuracy.  My second step will be to compare the ROC curves returned by the models and compare the AUC of each.
+
+4. Description of your progress:
+
+(a) Summarize what has been completed and what remains to do.
+So far I have read in the data and combined the test and traing set into one.  Due to the limited number of observations I felt it was really important to keep as much information as possible and therefore I decided to fill in the null values instead of dropping them.  Most of the null values could be easily interpreted as simply not having an aspect of a home(e.g. no pool, no alley, no garage), in which case I replaced null values with 'none'.  Once I replaced all the null values I completed the data cleaning phase and am now able to move on to the analysis.  My first step is to perform PCA.
+```{r}
+setwd("~/R")
+train.raw <- read.csv("train.csv")
+train.clean <- read.csv("train.clean.csv")
+test.raw <- read.csv("test.csv")
+
+test.raw$SalePrice <- rep(NA, 1459)
+
+data <- rbind(train.raw, test.raw)
+str(data)
+summary(data)
+# Lets take a look at the cleanliness of the data
+Num_NA<-sapply(data,function(y)length(which(is.na(y)==T)))
+sum(Num_NA)
+sort(sapply(data, function(x) { sum(is.na(x)) }), decreasing=TRUE)
+
+##After replacing NA with none for relavent attributes we can check null values again
+Num_NA<-sapply(train.clean,function(y)length(which(is.na(y)==T)))
+sum(Num_NA)
+sort(sapply(train.clean, function(x) { sum(is.na(x)) }), decreasing=TRUE)
+##Still high number of Null values but now only 5 attributes affected
+
+##Lets see if we can predict LotFrontage
+col.pred <- c("MSSubClass", "MSZoning", "LotFrontage", "LotArea", "Street", "Alley", "LotShape", "LandContour", "LotConfig", "LandSlope", "BldgType", "HouseStyle", "YrSold", "SaleType", "SaleCondition")
+
+frntage.rpart <- rpart(LotFrontage ~ .,
+                           data = train.clean[!is.na(train.clean$LotFrontage),col.pred],
+                           method = "anova",
+                           na.action=na.omit)
+
+train.clean.frontage <- as.data.frame(rbind(cbind(rep("Existing", nrow(train.clean[!is.na(train.clean$LotFrontage),])),train.clean[!is.na(train.clean$LotFrontage), "LotFrontage"]),
+                     cbind(rep("Imputed", nrow(train.clean[is.na(train.clean$LotFrontage),])),
+                           ceiling(predict(frntage.rpart, train.clean[is.na(train.clean$LotFrontage),col.pred])))))
+
+
+plot <- ggplot(train.clean.frontage, aes (x = as.numeric(as.character(V2)), colour = V1)) +
+    geom_density()+
+    xlab("Lot Frontage")+
+  theme(legend.title=element_blank())
+plot(frntage.rpart)
+hist(train.clean$SalePrice)
+##Same method for GarageYRBLT
+col.pred <- c("GarageType", "GarageYrBlt", "GarageFinish", "GarageQual","GarageCond","YearBuilt", "GarageCars", "GarageArea")
+
+blt.rpart <- rpart(as.factor(GarageYrBlt) ~ .,
+                           data = train.clean[!is.na(train.clean$GarageYrBlt),col.pred],
+                           method = "class",
+                           na.action=na.omit)
+##Lets plot before we use variables to see if results are viable
+train.clean.frontage <- as.data.frame(rbind(cbind(rep("Existing", nrow(train.clean[!is.na(train.clean$GarageYrBlt),])),train.clean[!is.na(train.clean$GarageYrBlt), "GarageYrBlt"]),
+                     cbind(rep("Imputed", nrow(train.clean[is.na(train.clean$GarageYrBlt),])),
+                           ceiling(predict(blt.rpart, train.clean[is.na(train.clean$GarageYrBlt),col.pred])))))
+
+
+ggplot(train.clean.frontage, aes (x = as.numeric(as.character(V2)), colour = V1)) +
+    geom_density()+
+    xlab("Lot Frontage")+
+  theme(legend.title=element_blank())
+
+train.clean$GarageYrBlt[is.na(train.clean$GarageYrBlt)] <- as.numeric(as.character(predict(blt.rpart, train.clean[is.na(train.clean$GarageYrBlt),col.pred], type = "class")))
+
+##MasVnrType prediction for null
+
+##MasVnr Area predictions for null values
+
+##Electrical prediction for null value
+# Likely predictors
+col.pred <- c("BldgType", "HouseStyle", "OverallQual", "OverallCond", "YearBuilt", "YearRemodAdd", "Electrical")
+
+elec.rpart <- rpart(as.factor(Electrical) ~ .,
+                           data = train.clean[!is.na(train.clean$Electrical),col.pred],
+                           method = "class",
+                           na.action=na.omit)
+
+train.clean$Electrical[is.na(train.clean$Electrical)] <- as.character(predict(elec.rpart, train.clean[is.na(train.clean$Electrical),col.pred], type = "class"))
+
+## We might consider taking these variables out due to high number of nulls
+##data.train <- subset(data, select = -c(PoolQC, MiscFeature, Alley, Fence) )
+
+##Alternatively we can interpret the nulls as not having variable
+summary(as.factor(data$PoolQC))
+table(data$PoolArea > 0, data$PoolQC, useNA = "ifany")
+data[data$PoolArea == 0,]$PoolQC <- rep('None', 2906) 
+train.raw$PoolQC <- ifelse()
+```
+
+```{r}
+##Creating labels
+summary(data$SalePrice)
+data[is.na(data)] <- 0
+price <- data$SalePrice
+quantile(price, c(.32, .57, .98))
+quantile(train.raw$SalePrice, c(.2,.4,.6,.8,1))
+
+Rpart model:
+# ##Tree using rpart
+# tree.rpart <- rpart(label~ . , data = train, method = "class")
+# fancyRpartPlot(tree.rpart, main = "Basic Classification Tree")
+# 
+# ##Plot ROC Curve and compute AUC
+# plot.roc(roc(test$label, as.numeric(predict(ptree, test, type = "class")))
+#          , print.auc = TRUE, print.thres = TRUE, las = 1)
+# 
+# printcp(tree.rpart)
+# plotcp(tree.rpart)
+# cp <- tree.rpart$cptable[which.min(tree.rpart$cptable[,"xerror"]),"CP"]
+# ptree<- prune(tree.rpart, cp = cp)
+# fancyRpartPlot(ptree, uniform =TRUE, main = "Pruned Classification Tree")
+# summary(ptree)
+# printcp(ptree)
+# plotcp(ptree)
+# ptree
+# post(ptree, file="")
+# 
+# ##Plot ROC Curve and compute AUC
+# plot.roc(roc(test$label, as.numeric(predict(ptree, test, type = "class")))
+#          , print.auc = TRUE, print.thres = TRUE, las = 1)
+
+
+
+numeric.data <- train[sapply(train, is.numeric)]
+
+#Apply cor function
+descr.cor <- cor(numeric.data)
+
+#Get all the correlated variables where correlation coefficient >= 0.7
+highly.correlated <- findCorrelation(descr.cor, cutoff = 0.75, verbose = T, names = T)
+highly.cor.col <- colnames(numeric.data[highly.correlated])
+highly.cor.col
+#Remove the correlated variables
+train.cor <- train[, -which(colnames(train) %in% highly.cor.col)]
+
+#New base model without collinear attributes
+glm.non <- glm(label ~ . , data = train.cor, family = binomial(link = 'logit'))
+summary(glm.non)
+fitted.results <- predict(glm.non,newdata=test,type='response')
+fitted.results <- ifelse(fitted.results > 0.5,1,2)
+miserror <- mean(fitted.results != test$label)
+1-miserror
+
+glm.fit2 <- glm(label ~ texture_mean + area_mean +  
+      texture_se + smoothness_se + symmetry_se + fractal_dimension_se + 
+      smoothness_worst + fractal_dimension_worst, 
+    data = train, family = binomial(link = 'logit'), 
+    control = list(maxit=100))
+summary(glm.fit2)
+fitted.results <- predict(glm.fit2,newdata=test,type='response')
+fitted.results <- ifelse(fitted.results > 0.5,1,2)
+miserror <- mean(fitted.results != test$label)
+1-miserror
+
+```
